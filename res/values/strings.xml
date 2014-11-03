@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="record">Record</string>
+    <string name="speak_wait">Please wait</string>
+    <string name="app_name">Topicify</string>
+    <string name="app_name_launcher">Topicify</string>
+    <string name="app_name_activity">Topicify Activity</string>
+    <string name="app_name_service">Topicify Service</string>
+    <string name="result"> </string>
+    <string name="stt">Speech-to-Text</string>
+</resources>
