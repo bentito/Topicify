@@ -1,31 +1,53 @@
-/*
-Licensed by AT&T under 'Software Development Kit Tools Agreement' 2012.
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION: http://developer.att.com/sdk_agreement/
-Copyright 2012 AT&T Intellectual Property. All rights reserved. 
-For more information contact developer.support@att.com http://developer.att.com
-*/
 package edu.dartmouth.topicify;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import org.apache.http.Header;
+import org.apache.http.HeaderElement;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpResponse;
+import org.apache.http.NameValuePair;
+import org.apache.http.StatusLine;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.BasicResponseHandler;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.protocol.HTTP;
+import org.apache.http.util.EntityUtils;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.media.MediaRecorder;
+import android.net.ParseException;
 import android.os.Bundle;
 import android.os.Environment;
+import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
 import android.view.View;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
+//import android.webkit.WebView;
+//import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -37,37 +59,35 @@ import com.att.android.speech.ATTSpeechResultListener;
 import com.att.android.speech.ATTSpeechService;
 import edu.dartmouth.topicify.R;
 
-/**
- * SimpleSpeech is a very basic demonstration of using the ATTSpeechKit 
- * to do voice recognition.  It is designed to introduce a developer to making 
- * a new application that uses the AT&T SpeechKit Android library.  
- * It also documents some of the more basic Android methods for those developers 
- * that are new to Android as well.
- * 
- * This version of the sample code shows how to call ATTSpeechService.
-**/
 public class SpeechService extends Activity {
-    private Button recordButton = null;
     private Button sttButton = null;
+    private Button recordButton = null;
+    private Button topicButton = null;
     private TextView resultView = null;
-    private WebView webView = null;
+    private MediaRecorder mRecorder = new MediaRecorder();
     private String oauthToken = null;
     private final String TESTAUDIOFILENAME = "/testaudiofile.amr";
+    private String speechTxtInit = "";
     
     /** 
-     * Called when the activity is first created.  This is where we'll hook up 
-     * our views in XML layout files to our application.
+     * Called when the activity is first created.
     **/
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
+        // create the speech text file with nothing in it.
+        saveSpeechText("");
         // First, we specify which layout resource we'll be using.
         setContentView(R.layout.speech);
         
-        recordButton = (Button)findViewById(R.id.stt_button);
-        recordButton.setOnClickListener(new View.OnClickListener() {
+        sttButton = (Button)findViewById(R.id.stt_button);
+        sttButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+            	Log.v("Topicify", "Saving AMR audiofile");
+    			mRecorder.stop();
+				mRecorder.reset();
+				mRecorder.release();
+				recordButton.setText("Record");
                 try {
 					startSpeechService();
 				} catch (IOException e) {
@@ -77,24 +97,44 @@ public class SpeechService extends Activity {
             }
         });
         
-        sttButton = (Button)findViewById(R.id.record_button);
-        sttButton.setOnClickListener(new View.OnClickListener() {
+        recordButton = (Button)findViewById(R.id.record_button);
+        recordButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 try {
-					recordAudioFile();
+                	if (recordButton.getText().equals("Record")) {
+                		recordButton.setText("Pause");
+                		recordAudioFile();
+                	} else { // Pause pushed
+            			mRecorder.stop();
+        				mRecorder.reset();
+        				mRecorder.release();
+                		recordButton.setText("Record");
+                        try {
+        					startSpeechService();
+        				} catch (IOException e) {
+        					// TODO Auto-generated catch block
+        					e.printStackTrace();
+        				}
+                	}
+					
 				} catch (IOException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
+//				} catch (InterruptedException e) {
+//					// TODO Auto-generated catch block
+//					e.printStackTrace();
 				}
             }
         });
         
+        topicButton = (Button)findViewById(R.id.topicsButton);
+        topicButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+            	postData();
+            }
+        });
         // This will show the recognized text.
         resultView = (TextView)findViewById(R.id.result);
-        
-        // This will show a website receiving the recognized text.
-        webView = (WebView)findViewById(R.id.webview);
-        configureWebView();
     }
     
     /** 
@@ -109,13 +149,104 @@ public class SpeechService extends Activity {
         // Fetch the OAuth credentials.  
         validateOAuth();
     }
+    
+    private String readSpeechText() {
+    	String fileText = null;
+    	File sdcard = Environment.getExternalStorageDirectory();
 
+    	//Get the text file
+    	File file = new File(sdcard,"speech.txt");
+
+    	//Read text from file
+    	StringBuilder text = new StringBuilder();
+
+    	try {
+    	    BufferedReader br = new BufferedReader(new FileReader(file));
+    	    String line;
+
+    	    while ((line = br.readLine()) != null) {
+    	        text.append(line);
+    	        text.append('\n');
+    	    }
+    	    br.close();
+    	}
+    	catch (IOException e) {
+    	    //You'll need to add proper error handling here
+    	}
+    	fileText = text.toString();
+    	return fileText;
+    }
+
+    private void saveSpeechText(String speechTxt) {
+    	try
+    	{
+    		File sdcard = Environment.getExternalStorageDirectory();
+    		File speechFile = new File(sdcard, "speech.txt");
+    		if (!speechFile.exists())
+    			speechFile.createNewFile();
+
+    		BufferedWriter writer = new BufferedWriter(new FileWriter(speechFile, true /*append*/));
+    		writer.write(speechTxt + " ");
+    		writer.close();
+    	}
+    	catch (IOException e)
+    	{
+    		Log.e("Topicify", "Unable to write to the speech.txt file."+ e.getMessage());
+    	}
+    }
+
+    public void postData() {
+        // Create a new HttpClient and Post Header
+        HttpClient httpclient = new DefaultHttpClient();
+        HttpPost httppost = new HttpPost("http://lda.herokuapp.com/topics");
+        
+        httppost.setHeader("Accept", "*/*");
+        httppost.setHeader("Content-Type", "application/x-www-form-urlencoded");
+        httppost.setHeader("Expect", "100-continue");
+        
+        try {
+            // Add your data
+        	String speechText = readSpeechText();
+            StringEntity se = new StringEntity(speechText, HTTP.UTF_8);
+            se.setContentType("application/x-www-form-urlencoded");
+        	httppost.setEntity(se);
+        	
+        	Header[] headers = httppost.getAllHeaders();
+          	for (Header header : headers) {
+        		Log.e("Topicify","Req: Key : " + header.getName() + ":" + header.getValue());
+        	}
+            // Execute HTTP Post Request
+            HttpResponse response = httpclient.execute(httppost);
+            StatusLine status = response.getStatusLine();
+
+            String responseBody = EntityUtils.toString(response.getEntity(), "UTF-8");
+	
+        	headers = response.getAllHeaders();
+        	for (Header header : headers) {
+        		Log.e("Topicify","Resp: Key : " + header.getName() + " ,Value : " + header.getValue());
+        	}
+            Log.e("Topicify", "Response status in postData:"+ status.toString());
+            
+            TextView topicView = (TextView)findViewById(R.id.topicsTextView);
+            topicView.setMovementMethod(new ScrollingMovementMethod());
+            topicView.setText(responseBody);
+
+            Log.e("Topicify", "responseBody:"+ responseBody);
+        } catch (UnsupportedEncodingException e) {
+        	Log.e("Topicify", "Problem in postData: uee:"+ e.getMessage());
+        } catch (ClientProtocolException e) {
+        	Log.e("Topicify", "Problem in postData: cpe:"+ e.getMessage());
+        } catch (IOException e) {
+        	Log.e("Topicify", "Problem in postData: ioe:"+ e.getMessage());
+        }
+    } 
+    
     private void recordAudioFile() throws IOException {
-        // TODO work here on getting correct audio version of bytes that AT&T wants
-        // trying: record file as 3GP/AMR/WB (wideband), read same file back in as byte array and submit to speech-to-text service
+    	// start recording file as 3GP/AMR/NB (narrowband)
     	Log.v("Topicify", "Record Button Pushed");
-		final MediaRecorder mRecorder = new MediaRecorder();
+    	mRecorder = new MediaRecorder();
 		mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+		Log.v("Topicify", "Audio Source Set");
 		mRecorder.setOutputFormat(MediaRecorder.OutputFormat.AMR_NB);
 		String mFileName = Environment.getExternalStorageDirectory().getAbsolutePath();
 		mFileName += TESTAUDIOFILENAME;
@@ -128,74 +259,51 @@ public class SpeechService extends Activity {
 			Log.e("AUDIO", "prepare() failed");
 		}
 		mRecorder.start();
-		new Timer().schedule(new TimerTask() {
-
-			@Override
-			public void run() {
-				runOnUiThread(new Runnable() {
-
-					@Override
-					public void run() {
-						mRecorder.stop();
-						mRecorder.reset();
-						mRecorder.release();
-					}
-				});
-
-			}
-		}, 5000);
-		Log.v("Topicify", "Saving AMR audiofile");
-		// Just trying to call it a WAV file so far
     }
     
     /** 
-     * Called by the Speak button in the sample activity.
-     * Starts the SpeechKit service that listens to the microphone and returns
-     * the recognized text.
+     * Starts the SpeechKit service with recorded audio file
+     *	ResultListener gets the recognized text. ErrorListener gets recognition errors
      * @throws IOException 
     **/
     private void startSpeechService() throws IOException {
-        // The ATTSpeechKit uses a singleton object to interface with the 
-        // speech server.
-        ATTSpeechService speechService = ATTSpeechService.getSpeechService(this);
-        
-        // Register for the success and error callbacks.
-        speechService.setSpeechResultListener(new ResultListener());
-        speechService.setSpeechErrorListener(new ErrorListener());
-        // Next, we'll put in some basic parameters.
-        // First is the Request URL.  This is the URL of the speech recognition 
-        // service that you were given during onboarding.
-        try {
-            speechService.setRecognitionURL(new URI(SpeechConfig.serviceUrl()));
-        }
-        catch (URISyntaxException ex) {
-            throw new IllegalArgumentException(ex);
-        }
-        
-        // Specify the speech context for this app.
-        speechService.setSpeechContext("Generic");
-        
-        // Set the OAuth token that was fetched in the background.
-        speechService.setBearerAuthToken(oauthToken);
-        
-        // Add extra arguments for speech recognition.
-        // The parameter is the name of the current screen within this app.
-        speechService.setXArgs(
-                Collections.singletonMap("ClientScreen", "main"));
+    	ATTSpeechService speechService = null;
+		Log.v("Topicify", "Starting speech interaction");
 
-        // Finally we have all the information needed to start the speech service.  
-//        speechService.startListening();
-//        Log.v("SimpleSpeech", "Starting speech interaction");
-		String mFileName = Environment.getExternalStorageDirectory().getAbsolutePath();
-		mFileName += TESTAUDIOFILENAME;
-//        byte [] audioDataFromWAV = IOUtil.readFile(mFileName);
-        byte [] audioData = IOUtil.readBufferedFile(mFileName);
-        
-        speechService.setContentType("audio/amr");
-        speechService.setShowUI(false);
-        
-		speechService.startWithAudioData(audioData);
-        Log.v("Topicify", "Sending amr audiofile");
+    		speechService = ATTSpeechService.getSpeechService(this);
+
+    		// Register for the success and error callbacks.
+    		speechService.setSpeechResultListener(new ResultListener());
+    		speechService.setSpeechErrorListener(new ErrorListener());
+
+    		try {
+    			speechService.setRecognitionURL(new URI(SpeechConfig.serviceUrl()));
+    		}
+    		catch (URISyntaxException ex) {
+    			throw new IllegalArgumentException(ex);
+    		}
+
+    		// Specify the speech context for this app.
+    		speechService.setSpeechContext("Generic");
+
+    		// Set the OAuth token that was fetched in the background.
+    		speechService.setBearerAuthToken(oauthToken);
+
+    		// Add extra arguments for speech recognition.
+    		// The parameter is the name of the current screen within this app.
+    		speechService.setXArgs(
+    				Collections.singletonMap("ClientScreen", "main"));
+
+    		String mFileName = Environment.getExternalStorageDirectory().getAbsolutePath();
+    		mFileName += TESTAUDIOFILENAME;
+
+    		byte [] audioData = IOUtil.readBufferedFile(mFileName);
+
+    		speechService.setContentType("audio/amr");
+    		speechService.setShowUI(false);
+
+    		speechService.startWithAudioData(audioData);
+    		Log.v("Topicify", "Sending amr audiofile");
     }
     
     /**
@@ -207,7 +315,7 @@ public class SpeechService extends Activity {
             List<String> textList = result.getTextStrings();
             String resultText = null;
             if (textList != null && textList.size() > 0) {
-                // There may be multiple results, but this example will only use
+                // There may be multiple results, but we will only use
                 // the first one, which is the most likely.
                 resultText = textList.get(0);
             }
@@ -228,22 +336,9 @@ public class SpeechService extends Activity {
     private void handleRecognition(String resultText) {
         // In this example, we set display the text in the result view.
         resultView.setText(resultText);
-        // And then perform a search on a website using the text.
-        String query = URLEncoder.encode(resultText);
-        String url = "http://en.m.wikipedia.org/w/index.php?search="+query;
-        webView.loadUrl(url);
+        saveSpeechText(resultText);
     }
-    
-    /** Configure the webview that displays websites with the recognition text. **/
-    private void configureWebView() {
-        webView.getSettings().setJavaScriptEnabled(true);
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return false; // Let the webview display the URL
-            }
-        });
-    }
+   
 
     /**
      * This callback object will get all the speech error notifications.
@@ -284,8 +379,8 @@ public class SpeechService extends Activity {
             SpeechAuth.forService(SpeechConfig.oauthUrl(), SpeechConfig.oauthScope(), 
                 SpeechConfig.oauthKey(), SpeechConfig.oauthSecret());
         auth.fetchTo(new OAuthResponseListener());
-        recordButton.setText(R.string.speak_wait);
-        recordButton.setEnabled(false);
+        sttButton.setText(R.string.speak_wait);
+        sttButton.setEnabled(false);
     }
     
     /**
@@ -297,8 +392,8 @@ public class SpeechService extends Activity {
         {
             if (token != null) {
                 oauthToken = token;
-                recordButton.setText(R.string.stt);
-                recordButton.setEnabled(true);
+                sttButton.setText(R.string.stt);
+                sttButton.setEnabled(true);
             }
             else {
                 Log.v("Topicify", "OAuth error: "+error);

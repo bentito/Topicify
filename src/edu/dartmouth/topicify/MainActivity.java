@@ -18,7 +18,6 @@ import edu.dartmouth.topicify.R;
 /**
  * A simple activity launcher.
 **/
-// TODO: Bring over WAV saving code from MainTopicifyActivity and see how to get it in form AT&T wants to process bytes.
 public class MainActivity extends ListActivity
 {
     /**
@@ -30,8 +29,8 @@ public class MainActivity extends ListActivity
 
         // Display the list of sample activities in a standard Android layout.
         activities = new Item[] {
-            new Item(new Intent(this, SpeechActivity.class), 
-                    getString(R.string.app_name_activity)),
+//            new Item(new Intent(this, SpeechActivity.class), 
+//                    getString(R.string.app_name_activity)),
             new Item(new Intent(this, SpeechService.class), 
                     getString(R.string.app_name_service))
         };

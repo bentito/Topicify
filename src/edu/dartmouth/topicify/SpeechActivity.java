@@ -66,8 +66,8 @@ public class SpeechActivity extends Activity {
         resultView = (TextView)findViewById(R.id.result);
         
         // This will show a website receiving the recognized text.
-        webView = (WebView)findViewById(R.id.webview);
-        configureWebView();
+//        webView = (WebView)findViewById(R.id.webview);
+//        configureWebView();
     }
     
     /** 
